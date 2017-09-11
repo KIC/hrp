@@ -1,0 +1,3 @@
+[submodule "hierarchical-clustering-java"]
+	path = hierarchical-clustering-java
+	url = https://github.com/lbehnke/hierarchical-clustering-java.git
