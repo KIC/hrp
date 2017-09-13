@@ -6,9 +6,6 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 
-/**
- * Created by kindler on 08/09/2017.
- */
 public class Operations {
 
     public static <RK, CK, I, O>BiConsumer<DataFrame<RK, CK, I>, DataFrame<RK, CK, O>> deltaOperation(BiFunction<I, I, O> deltaCalculation) {
@@ -25,7 +22,7 @@ public class Operations {
                     if (!(sell.value.get(ck) == null || buy.value.get(ck) == null)) {
                         throw npe;
                     } else {
-                        // ignore the fact that one value was null, this prevents us from storing null
+                        // ignore the fact that one value was null (this also prevents us from storing null results)
                     }
                 }
             }

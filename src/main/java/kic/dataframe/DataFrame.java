@@ -21,9 +21,6 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/**
- * Created by kindler on 07/09/2017.
- */
 public class DataFrame<RK, CK, V> implements Serializable {
     private static final Map EMPTY_MAP = Collections.unmodifiableMap(new HashMap());
     private final List<RK> rowOrder;
@@ -127,10 +124,15 @@ public class DataFrame<RK, CK, V> implements Serializable {
         return new DataFrame<>(this, new ArrayList<>(new LinkedHashSet<>(rows)), columnOrder);
     }
 
-    public DataFrame<RK, CK, V> select(Collection<CK> columns) {
-        return new DataFrame<>(this, rowOrder, new ArrayList<>(new LinkedHashSet<>(columns)));
+    public DataFrame<RK, CK, V> select(Collection<CK> columns, Collection<RK> rows) {
+        return new DataFrame<>(this,
+                new ArrayList<>(new LinkedHashSet<>(rows)),
+                new ArrayList<>(new LinkedHashSet<>(columns)));
     }
 
+    public DataFrame<RK, CK, V> select(Collection<CK> columns) {
+        return select(columns, getRowOrder());
+    }
 
     public <RK2,CK2,V2>DataFrame<RK2, CK2, V2> slide(int windowSize, BiConsumer<DataFrame<RK,CK,V>, DataFrame<RK2,CK2,V2>> windowFunction) {
         /* we could make a window function of 60, which is calculating the 59 returns and then calculates the correlcation/covariance matrices and put those in a new DataFrame
