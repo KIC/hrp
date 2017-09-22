@@ -1,44 +1,59 @@
 #!/usr/bin/env groovy
-
-
-import kic.dataframe.*
-
+import groovy.json.JsonOutput
 import static java.lang.Math.*
 
-//@Grab(group='com.apporiented', module='hierarchical-clustering', version='1.1.1-SNAPSHOT')
-//@Grab(group='kic', module='dataframe', version='1.0-SNAPSHOT')
-import kic.dataframe.DataFrame
+//@Grab(group='kic', module='dataframe', version='1.0-SNAPSHOT', changing=true)
+import kic.dataframe.*
+import kic.dataframe.linalg.*
+import kic.pipeline.PipelineExecutor
 import static kic.dataframe.Operations.*
 
-//@Grab(group='org.apache.commons', module='commons-math3', version='3.6.1')
-import org.apache.commons.math3.stat.correlation.*
+// TODO Next
+// TODO make rebalancing happening on sundays
+// TODO add trading costs
+// TODO add minimum variance portfolio (markowiz) as 2nd benchmark
+// TODO we could also plot a video of the clustered correlation matrix like so:
+// http://www.gnuplotting.org/animation-video/ || http://www.gnuplotting.org/tag/animation/ && http://gnuplot.sourceforge.net/demo_svg/heatmaps.html
 
-// runtime parameters
+
+// runtime parameters - later parse this from commandline: http://mrhaki.blogspot.ch/2009/09/groovy-goodness-parsing-commandline.html
 currencies = ["BTC", "LTC", "ETH", "XRP", "XMR", "DASH", "REP", "ZEC", "ETC"]
 referenceCurrency = "EUR"
 exchange="CCCAGG"
 frequency = "day"
+covariance_max_0_percent = 10
+trading_costs = 0.0016 // 0.16% on kraken
+
+// constants
+PATH = new File(getClass().protectionDomain.codeSource.location.path).getParentFile()
+PLOTPATH = new File(PATH, "../gnuplot/")
+COVARIANCE = "covariance"
+CORRELATION = "correlation"
+CLUSTERED = "clustered"
+VaR95_Z_SCORE = 1.645 //Stddev to VaR factor = 1.645
+
+println("running at: $PATH\nusing temp: ${System.getProperty('java.io.tmpdir')}")
+
+// NOTE we have weired huge jumps i.e. dash jumps 1400% in one day, so we ignore 3 fold and bigger jumps in prices
+def experiment = new PipelineExecutor("prices", getPriceDataFrame(currencies))
+    .then("returns", { it.slide(2, deltaOperation({ sell, buy -> sell != buy && sell < 3 * buy ? sell / buy - 1d : null }))})
+    .then("objective", { it.slide(60, covarianceCorrelationEstimator(3, false)) })
+    .then("weights", { it.slide(1, optimizePortfolio()) }) // TODO we could do a weekly rebalancing instead of daily
+    .join(["returns", "objective", "weights"], "portfolio", { it[0].slide(1, join(it[1], it[2])).sortColumns() }) // TODO we need a nice join operator here ....
+    .pass(new Gnuplot(new File(PLOTPATH, "hrp-backtest.gnuplot"), new File("/tmp/hrp-backtest.jpg"), { [weights: it.columns() + 1] }))
+    .then("current-weights", { weights -> weights.select({ it.startsWith("weight.") }).withRows([weights.lastRowKey()]).transpose() })
+    .pass(new Gnuplot(new File(PLOTPATH, "hrp-current.gnuplot"), new File("/tmp/hrp-current.jpg")))
+    .getPipelineResults()
 
 
+println(experiment["portfolio"])
+
+// if needed output some json files ...
+//new File("rows.json").text = JsonOutput.toJson(joined.reshape.toMapOfRowMaps())
+//new File(columns.json).text = JsonOutput.toJson(joined.reshape.toMapOfColumMaps())
+println("done")
 
 
-// predefined operations
-calcReturn = deltaOperation({ sell, buy -> sell / buy - 1d})
-calcLogReturn = deltaOperation({ sell, buy -> log(sell / buy)})
-
-// business logic
-DataFrame prices = getPriceDataFrame(currencies)
-
-println(prices)
-
-returns = prices.slide(2, calcLogReturn)
-println(returns)
-
-objective = returns.slide(60, covarianceCorrelationEstimator(3, false))
-println(objective)
-
-weights = objective.slide(1, optimizePortfolio()) // we could do a weely rebalancing
-println(weights)
 
 // Functions
 DataFrame getPriceDataFrame(currencies) {
@@ -46,7 +61,7 @@ DataFrame getPriceDataFrame(currencies) {
     DataFrame prices = new DataFrame()
 
     currencies.forEach { ccy ->
-        cc.getHistData(ccy, referenceCurrency, frequency, 0,  exchange).forEach { bar ->
+        cc.getHistData(ccy, referenceCurrency, frequency, 0, exchange).forEach { bar ->
             prices.upsert(bar.time, ccy, bar.close)
         }
     }
@@ -55,77 +70,109 @@ DataFrame getPriceDataFrame(currencies) {
 }
 
 
+def join(DataFrame objective, DataFrame targetWeights) {    // FIXME this join thingy needs to be refactored as well ... we need a proper join
+    def portfolioPerformance = 0d;
+    def oneOverNPerformance = 0d;
+
+    return { DataFrame window, DataFrame result ->
+        def lastRowKey = window.lastRowKey()
+        DataFrame covariance = objective.getElement(lastRowKey, COVARIANCE)
+        if (covariance?.columns() > 1) {
+            // weigths
+            LabeledMatrix targetWeightsVector = targetWeights.select(covariance.getColumnOrder())
+                                                             .withRows([lastRowKey])
+                                                             .toMatrix()
+
+            LabeledMatrix returnsVector = window.select(covariance.getColumnOrder())
+                                                .withRows([lastRowKey])
+                                                .toMatrix()
+                                                .transpose()
+
+            LabeledMatrix oneOverNWeightsVector = returnsVector.elementWise {d -> 1d / returnsVector.rows()}
+                                                               .transpose()
+
+            // returns
+            def portfolioReturn = targetWeightsVector.multiply(returnsVector).sum()
+            def oneOverNReturn = oneOverNWeightsVector.multiply(returnsVector).sum()
+
+            // risk
+            def covarianceMatrix = covariance.toMatrix()
+            def portfolioRisk = sqrt(targetWeightsVector.multiply(covarianceMatrix).multiply(targetWeightsVector.transpose()).sum())
+            def oneOverNRisk = sqrt(oneOverNWeightsVector.multiply(covarianceMatrix).multiply(oneOverNWeightsVector.transpose()).sum())
+
+            // performance
+            portfolioPerformance = (1d + portfolioPerformance) * (1d + portfolioReturn) - 1d
+            oneOverNPerformance = (1d + oneOverNPerformance) * (1d + oneOverNReturn) - 1d
+
+            // fill result
+            result.upsert(lastRowKey, "portfolio.risk", portfolioRisk * VaR95_Z_SCORE)
+            result.upsert(lastRowKey, "portfolio.return", portfolioReturn)
+            result.upsert(lastRowKey, "portfolio.performance", portfolioPerformance)
+            result.upsert(lastRowKey, "one-over-n.risk", oneOverNRisk * VaR95_Z_SCORE)
+            result.upsert(lastRowKey, "one-over-n.rerturn", oneOverNReturn)
+            result.upsert(lastRowKey, "one-over-n.performance", oneOverNPerformance)
+            targetWeightsVector.toDataframe().visit.walkRowWiseWithRowKey(
+                    result,
+                    {rk, df -> null},
+                    {rk, ck, val, df -> df.upsert(rk, "weight." + ck, val)})
+
+        }
+    }
+}
+
 def covarianceCorrelationEstimator(int minSize, boolean demean = false) {
     return { DataFrame window, DataFrame result ->
-        // first we need the intersect of the first and the last row
-        returns = window.select(window.getFirstRowAndLastRowsColumnsIntersect())
-        if (returns.getColumnOrder().size() < minSize) return
+        // check if we had enough price changes per asset to actually build a valid covariance matrix
+        def validColumns = window.countStar().findAll {col, cnt -> cnt >= window.rows() - (window.rows() / covariance_max_0_percent)}
 
-        // then we calculate the covariance and the correlationmatrix
-        returnsArray = returns.asDoubleMatrix({ d -> d } , false)
-        cov = new Covariance(returnsArray, !demean)
-        corr = new PearsonsCorrelation(cov)
+        // immediate return if we do not have enough data, i.e. ther is no point in optimizing a 1x1 Matrix
+        if (validColumns.size() < minSize) return
 
-        // then we convet the matrices into dataframes and store them in the result
-        labels = returns.getColumnOrder()
-        covDat = cov.getCovarianceMatrix().getData()
-        corrDat = corr.getCorrelationMatrix().getData()
-
-        DataFrame covarianceMatrix = new DataFrame()
-        DataFrame correlationMatrix = new DataFrame()
-        for (int i = 0; i < labels.size(); i++) {
-            for (int j = 0; j < labels.size(); j++) {
-                covarianceMatrix.upsert(labels.get(i), labels.get(j), covDat[i][j])
-                correlationMatrix.upsert(labels.get(i), labels.get(j), corrDat[i][j])
-            }
-        }
-
-        clustered = correlationMatrix.clusterSymetric({d -> sqrt(1d - d / 2d) })
-        result.upsert(window.getLastRow().rowKey, "covariance", covarianceMatrix)
-        result.upsert(window.getLastRow().rowKey, "correlation", correlationMatrix)
-        result.upsert(window.getLastRow().rowKey, "clustered", clustered)
-
+        // estimate covarianec and correlation matrices and a hierachical cluster
+        def returns = window.select(validColumns.keySet())
+        def covarianceMatrix = returns.toMatrix().covariance(demean).toDataframe()
+        def correlationMatrix = returns.toMatrix().correlation(demean).toDataframe()
+        def clustered = correlationMatrix.clustering({ d -> sqrt(1d - d / 2d) }).cluster()
+        result.upsert(window.lastRowKey(), COVARIANCE, covarianceMatrix)
+        result.upsert(window.lastRowKey(), CORRELATION, correlationMatrix)
+        result.upsert(window.lastRowKey(), CLUSTERED, clustered)
     }
 }
 
 
-
 def optimizePortfolio() {
     return { DataFrame window, DataFrame result ->
-        DataFrame.Tuple lastRow = window.getLastRow()
-        DataFrame covariance = lastRow.value["covariance"]
-        DataFrame clusteredCorrelation = lastRow.value["clustered"]
-        cItems = [clusteredCorrelation.getColumnOrder()]
-        weights = clusteredCorrelation.getColumnOrder().collectEntries { [(it): 1d] }
+        DataFrame covariance = window.getElement(window.lastRowKey(), COVARIANCE)
+        DataFrame clusteredCorrelation = window.getElement(window.lastRowKey(), CLUSTERED)
+        def cItems = [clusteredCorrelation.getColumnOrder()]
+        def weights = clusteredCorrelation.getColumnOrder().collectEntries { [(it): 1d] }
 
         while (cItems.size() > 0) {
             cItems = cItems.findAll { it.size() > 1 }
                            .collectMany { [it.subList(0, it.size().intdiv(2)), it.subList(it.size().intdiv(2), it.size())] }
 
             for (int i = 0; i < cItems.size(); i += 2) {
-                cItems0 = cItems[i]
-                cItems1 = cItems[i + 1]
-                cVar0 = inverseVariancePortfolio(covariance.select(cItems0, cItems0))
-                cVar1 = inverseVariancePortfolio(covariance.select(cItems1, cItems1))
-                alpha = 1 - cVar0 / (cVar0 + cVar1)
+                def cItems0 = cItems[i]
+                def cItems1 = cItems[i + 1]
+                def cVar0 = inverseVariancePortfolio(covariance.select(cItems0).withRows(cItems0))
+                def cVar1 = inverseVariancePortfolio(covariance.select(cItems1).withRows(cItems1))
+                def alpha = 1 - cVar0 / (cVar0 + cVar1)
                 cItems0.each { weights[it] *= alpha }
                 cItems1.each { weights[it] *= 1 - alpha }
                 // println("$cItems0 $cVar0 / $cItems1 $cVar1 / $alpha")
             }
         }
 
-        weights.each { result.upsert(lastRow.rowKey, it.key, it.value) }
+        weights.each { result.upsert(window.lastRowKey(), it.key, it.value) }
     }
 }
 
 def inverseVariancePortfolio(DataFrame cov) {
-    return Linalg.calcScalar(cov, { d -> d }, { mx ->
-        inverseDiagonal = mx.diagonal.map({ d -> 1d / d })
-        sum = inverseDiagonal.sum()
-        w = inverseDiagonal.map({ d -> d / sum })
-        var = w.matrix.multiply(mx.matrix).multiply(w.matrix.transpose()).getEntry(0,0)
-        return var;
-    })
+    def covMx = cov.toMatrix()
+    def inverseDiag = covMx.getDiagonal(MatrixShape.ROW_VECTOR).elementWise({1d / it})
+    def trace = inverseDiag.sum()
+    def weights = inverseDiag.elementWise({ it / trace })
+    return inverseVariance = weights.multiply(covMx).multiply(weights.transpose()).sum()
 }
 
 /*finally compute the hrp portfolio

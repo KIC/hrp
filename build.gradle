@@ -19,7 +19,10 @@ compileGroovy {
 
 dependencies {
     compile fileTree(dir: 'hierarchical-clustering-java/target', include: ['**/*.jar'])
+    compile group: 'org.apache.commons', name: 'commons-lang3', version: '3.6'
     compile group: 'org.apache.commons', name: 'commons-math3', version: '3.6.1'
+    compile group: 'com.github.yannrichet', name: 'JMathPlot', version: '1.0.1'
+    compile group: 'ch.qos.logback', name: 'logback-classic', version: '1.2.3'
 
     compile group: 'org.codehaus.groovy', name: 'groovy-all', version: '2.4.12'
     compile group: 'org.apache.ivy', name:'ivy', version:'2.2.0'
@@ -38,8 +41,8 @@ task cleanAll(type: Delete, dependsOn: clean) {
 
 
 task copyScriptFiles(type: Copy) {
-    from 'src/script/groovy'
-    into "$buildDir/scripts/"
+    from 'src/script'
+    into "$buildDir/"
     filter { String line -> line.replace("//@Grab", "@Grab")}
 }
 

@@ -1,9 +1,8 @@
 package kic.dataframe;
 
-import com.apporiented.algorithm.clustering.Cluster;
-import com.apporiented.algorithm.clustering.ClusteringAlgorithm;
-import com.apporiented.algorithm.clustering.DefaultClusteringAlgorithm;
-import com.apporiented.algorithm.clustering.SingleLinkageStrategy;
+import kic.dataframe.linalg.LabeledMatrix;
+import kic.interfaces.ToDouble;
+import kic.utils.MapUtil;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -17,8 +16,10 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 public class DataFrame<RK, CK, V> implements Serializable {
@@ -28,16 +29,9 @@ public class DataFrame<RK, CK, V> implements Serializable {
     private final Map<RK, Map<CK, Integer>> rowColumnIndex; // never loop over the index only use rowOrder
     private final Map<CK, Map<RK, Integer>> columnRowIndex; // never loop over the index only use columnOrder
     private final List<V> data;
-
-    public static class Tuple<RK, V> {
-        public final RK rowKey;
-        public final V value;
-
-        public Tuple(RK rowKey, V value) {
-            this.rowKey = rowKey;
-            this.value = value;
-        }
-    }
+    // In Scala word we would use implicit classes for composition but in java we have to hardwire
+    public final Reshape<RK, CK, V> reshape = new Reshape<>(this);
+    public final Visitor<RK, CK, V> visit = new Visitor<>(this);
 
     public DataFrame() {
         this.rowOrder = new ArrayList<>();
@@ -47,15 +41,26 @@ public class DataFrame<RK, CK, V> implements Serializable {
         this.data = new ArrayList<>();
     }
 
-    private DataFrame(DataFrame source, List<RK> rowOrder, List<CK> columnOrder) {
-        this.rowOrder = rowOrder;
-        this.columnOrder = columnOrder;
-        this.rowColumnIndex = source.rowColumnIndex;
-        this.columnRowIndex = source.columnRowIndex;
-        this.data = source.data;
+    protected DataFrame(DataFrame source, List<RK> rowOrder, List<CK> columnOrder) {
+        this(source, rowOrder, columnOrder, source.data);
     }
 
+    private DataFrame(DataFrame source, List<RK> rowOrder, List<CK> columnOrder, List<V> data) {
+        this(source, rowOrder, columnOrder, source.rowColumnIndex, source.columnRowIndex, data);
+    }
+
+    private DataFrame(DataFrame source, List<RK> rowOrder, List<CK> columnOrder, Map<RK, Map<CK, Integer>> rowColumnIndex, Map<CK, Map<RK, Integer>> columnRowIndex, List<V> data) {
+        this.rowOrder = rowOrder;
+        this.columnOrder = columnOrder;
+        // FIXME either make the indices unmodifyable (and also the submaps) or keep them unchanged to allow a correct "upsert"
+        this.rowColumnIndex = MapUtil.getAllEntries(rowColumnIndex, rowOrder);
+        this.columnRowIndex = MapUtil.getAllEntries(columnRowIndex, columnOrder);
+        this.data = data;
+    }
+
+
     public synchronized void upsert(RK rowKey, CK columKey, V value) {
+        if (value == null) return; // do not store null values
         Map<CK, Integer> columnIndex = rowColumnIndex.getOrDefault(rowKey, EMPTY_MAP);
         Map<RK, Integer> rowIndex = columnRowIndex.getOrDefault(columKey, EMPTY_MAP);
         Integer col = columnIndex.get(columKey);
@@ -73,67 +78,8 @@ public class DataFrame<RK, CK, V> implements Serializable {
         }
     }
 
-    /*public DataFrame<RK, CK, V> withColumnOrder(Iterable<CK> orderedColumns) {
-        return this;
-    }*/
 
-    public List<RK> getRowOrder() {
-        return Collections.unmodifiableList(rowOrder);
-    }
-
-    public List<CK> getColumnOrder() {
-        return Collections.unmodifiableList(columnOrder);
-    }
-
-    public Set<CK> getFirstRowAndLastRowsColumnsIntersect() {
-        Set<CK> intersect = new LinkedHashSet<>(getFirstRow().value.keySet());
-        intersect.retainAll(getLastRow().value.keySet());
-        return intersect;
-    }
-
-    public int rows() {
-        return rowOrder.size();
-    }
-
-    public int columns() {
-        return columnOrder.size();
-    }
-
-    public Tuple<RK, LinkedHashMap<CK,V>> getFirstRow() {
-        RK rk = rowOrder.get(0);
-        return new Tuple<>(rk, getRow(rk));
-    }
-
-    public Tuple<RK, LinkedHashMap<CK,V>> getLastRow() {
-        RK rk = rowOrder.get(rows()-1);
-        return new Tuple<>(rk, getRow(rk));
-    }
-
-    public LinkedHashMap<CK,V> getRow(RK rowKey) {
-        LinkedHashMap<CK,V> row = new LinkedHashMap<>();
-        Map<CK, Integer> columnIndex = rowColumnIndex.get(rowKey);
-        for (CK ck : columnIndex.keySet()) {
-            row.put(ck, data.get(columnIndex.get(ck)));
-        }
-
-        return row;
-    }
-
-
-    public DataFrame<RK, CK, V> withRowOrdering(Collection<RK> rows) {
-        return new DataFrame<>(this, new ArrayList<>(new LinkedHashSet<>(rows)), columnOrder);
-    }
-
-    public DataFrame<RK, CK, V> select(Collection<CK> columns, Collection<RK> rows) {
-        return new DataFrame<>(this,
-                new ArrayList<>(new LinkedHashSet<>(rows)),
-                new ArrayList<>(new LinkedHashSet<>(columns)));
-    }
-
-    public DataFrame<RK, CK, V> select(Collection<CK> columns) {
-        return select(columns, getRowOrder());
-    }
-
+    // TODO move to a different place
     public <RK2,CK2,V2>DataFrame<RK2, CK2, V2> slide(int windowSize, BiConsumer<DataFrame<RK,CK,V>, DataFrame<RK2,CK2,V2>> windowFunction) {
         /* we could make a window function of 60, which is calculating the 59 returns and then calculates the correlcation/covariance matrices and put those in a new DataFrame
             in the window function i would pass the same object but with different rowOrderings
@@ -166,81 +112,112 @@ public class DataFrame<RK, CK, V> implements Serializable {
         return result;
     }
 
-    public void aggregateRows() {
-        // what to do here ...
-        // what should we return? LinkedMap<RK, V>
+    public DataFrame<CK, RK, V> transpose() {
+        return new DataFrame<>(this, columnOrder, rowOrder, columnRowIndex, rowColumnIndex, data);
     }
 
-    public DataFrame<RK, CK, V> cluster(Function<V, Double> toDistance) {
-        LinkedHashMap<String, CK> colIndexMap = new LinkedHashMap<>();
-        for (CK ck : columnOrder) colIndexMap.put(ck.toString(), ck);
-
-        ClusteringAlgorithm alg = new DefaultClusteringAlgorithm();
-        Cluster cluster = alg.performClustering(
-                asDoubleMatrix(toDistance, false),
-                colIndexMap.keySet().toArray(new String[0]),
-                new SingleLinkageStrategy());
-
-        List<CK> orderedColumns = Clustering.getSortedNames(cluster).stream().map(n -> colIndexMap.get(n)).collect(Collectors.toList());
-        return new DataFrame<>(this, rowOrder, orderedColumns);
+    public DataFrame<RK, CK, V> select(Predicate<? super CK> filter) {
+        return select(columnOrder.stream().filter(filter).collect(Collectors.toList()), false);
     }
 
-    public DataFrame<CK, CK, V> clusterSymetric(Function<V, Double> toDistance) {
-        if (!rowOrder.equals(columnOrder)) throw new IllegalStateException("Data is not symetric! " + rowOrder + " vs " + columnOrder);
-        DataFrame<RK, CK, V> clustered = cluster(toDistance);
-        return (DataFrame<CK, CK, V>) clustered.withRowOrdering((List<RK>) clustered.getColumnOrder());
+    public DataFrame<RK, CK, V> select(Collection<CK> columns) {
+        return select(columns, false);
     }
 
-    public double[][] asDoubleMatrix(Function<V, Double> toDouble, boolean useLastIfMissing) {
-        double[][] mx = new double[rows()][columns()];
-        int i=0, j=0;
-        V v = null;
-
-        for (RK rk : rowOrder) {
-            j=0;
-            for (CK ck : columnOrder) {
-                v = getDataOr(rowColumnIndex.get(rk).get(ck), null);
-                if (v != null) {
-                    mx[i][j] = toDouble.apply(v);
-                } else if (useLastIfMissing && i > 0) {
-                    mx[i][j] = mx[i-1][j];
-                }
-                j++;
-            }
-            i++;
-        }
-
-        return mx;
+    public DataFrame<RK, CK, V> select(Collection<CK> columns, boolean withNulls) {
+        List<CK> cols = new ArrayList<>(new LinkedHashSet<CK>(columns));
+        if (!withNulls) cols.retainAll(columnOrder);
+        return new DataFrame<>(this, rowOrder, cols);
     }
 
-    private V getDataOr(Integer idx, V or) {
-        if (idx != null) {
-            return data.get(idx);
-        } else {
-            return or;
-        }
+    public DataFrame<RK, CK, V> withRows(Collection<RK> rows) {
+        return new DataFrame<>(this, new ArrayList<>(new LinkedHashSet<>(rows)), columnOrder);
+    }
+
+    public <R>DataFrame<RK, CK, R> map(Function<V, R> function) {
+        // Note this is actually wrong we only want to transform what is in rowOrdered/columnOrdered
+        // however the result is correct alltough its not very memory efficient for small subsets of large dataframes
+        return new DataFrame<>(this, rowOrder, columnOrder, data.stream().map(function).collect(Collectors.toList()));
+    }
+
+    public DataFrame<RK, CK, V> sortRows() {
+        return withRows(new TreeSet<>(rowOrder));
+    }
+
+    public DataFrame<RK, CK, V> sortColumns() {
+        return select(new TreeSet<>(columnOrder));
+    }
+
+    public LabeledMatrix<RK, CK> toMatrix() {
+        return toMatrix(false);
+    }
+
+    public LabeledMatrix<RK, CK> toMatrix(boolean fillMissingWithLast) {
+        return toMatrix(fillMissingWithLast, ToDouble.identity);
+    }
+
+    public LabeledMatrix<RK, CK> toMatrix(ToDouble<V> toDouble) {
+        return toMatrix(false, toDouble);
+    }
+
+    public LabeledMatrix<RK, CK> toMatrix(boolean fillMissingWithLast, ToDouble<V> toDouble) {
+        return new Linalg<>(this, toDouble).toMatrix(fillMissingWithLast);
+    }
+
+    public Clustering<RK, CK, V> clustering() {
+        return clustering(d -> (Double) d);
+    }
+
+    public Clustering<RK, CK, V> clustering(ToDouble<V> distance) {
+        return new Clustering<>(this, distance);
+    }
+
+    public RK firstRowKey() {
+        return rowOrder.size() > 0 ? rowOrder.get(0) : null;
+    }
+
+    public RK lastRowKey() {
+        return rowOrder.size() > 0 ? rowOrder.get(rows()-1) : null;
+    }
+
+    public V getElement(RK rk, CK ck) {
+        return columnRowIndex.containsKey(ck)
+            ? getDataOr((Integer) rowColumnIndex.getOrDefault(rk, EMPTY_MAP).get(ck), null)
+            : null;
+    }
+
+    public V getDataOr(Integer idx, V or) {
+        return idx != null? data.get(idx): or;
+    }
+
+    public List<RK> getRowOrder() {
+        return Collections.unmodifiableList(rowOrder);
+    }
+
+    public List<CK> getColumnOrder() {
+        return Collections.unmodifiableList(columnOrder);
+    }
+
+    public int rows() {
+        return rowOrder.size();
+    }
+
+    public int columns() {
+        return columnOrder.size();
+    }
+
+    public Map<CK, Integer> countStar() {
+        return columnOrder.stream()
+                .collect(Collectors.toMap(ck -> ck, ck -> MapUtil.getAllEntries(columnRowIndex.get(ck), rowOrder).size()));
+    }
+
+    public Collection<V> getData() {
+        return Collections.unmodifiableCollection(data);
     }
 
     @Override
     public String toString() {
-        StringBuilder sb = new StringBuilder();
-
-        // header
-        sb.append("ROW, ");
-        for (CK ck : columnOrder) sb.append(ck).append(", ");
-        sb.append("\n");
-
-        // body
-        for (RK rk : rowOrder) {
-            Map<CK, Integer> columnIndex = rowColumnIndex.get(rk);
-            sb.append(rk).append(", ");
-            for (CK ck : columnOrder) {
-                sb.append(getDataOr(columnIndex.get(ck), null)).append(", ");
-            }
-            sb.append("\n");
-        }
-
-        return sb.toString();
+        return reshape.toString();
     }
 
 }

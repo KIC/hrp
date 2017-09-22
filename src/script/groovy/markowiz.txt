@@ -1,0 +1,190 @@
+package kic.data.stream.statistical.trading
+
+import akka.stream.FlowShape
+import akka.stream.scaladsl.{Flow, GraphDSL}
+import akka.stream.scaladsl.GraphDSL.Builder
+import akka.stream.scaladsl.GraphDSL.Implicits._
+import cern.colt.matrix.tdouble.{DoubleFactory1D, DoubleFactory2D, DoubleMatrix1D, DoubleMatrix2D}
+import cern.colt.matrix.tdouble.algo.DenseDoubleAlgebra
+import cern.jet.math.tdouble.DoubleFunctions
+import com.joptimizer.functions.{ConvexMultivariateRealFunction, LinearMultivariateRealFunction, PDQuadraticMultivariateRealFunction}
+import com.joptimizer.optimizers.{JOptimizer, OptimizationRequest}
+
+import kic.data.stream.domain._
+import kic.data.stream.flows.Sliding.SlidingWindow
+
+/**
+  * Created by kindler on 03/06/2017.
+  *
+  * TODO make the riskaversion an optinal and only scale the objectives if provided
+  * TODO add another optional to optimize against a target return aka tanget line via risk free return
+  */
+/*
+case class MarkowizPortfolio[K, T <: Key[K]](riskAversion: Double, smallPositionThreshold: Double) extends FlowBundle[PortfolioOptimizationDataFrame[K], PortfolioWeightsDataFrame[K]] with FlowProvider[PortfolioOptimizationDataFrame[K], PortfolioWeightsDataFrame[K]] {
+  require(riskAversion >= 0d && riskAversion <= 1d)
+
+  override def name: String = "markowiz-portfolio"
+
+  override def flowProvider(flowName: String)(implicit graphBuilder: Builder[_]): FlowShape[PortfolioOptimizationDataFrame[K], PortfolioWeightsDataFrame[K]] = {
+    // FIXME this is a really bad soltion which we need to clean out!!!
+
+    graphBuilder.add(
+      Flow.fromGraph(GraphDSL.create() { implicit b =>
+        val drityFix = b.add(SlidingWindow[PortfolioWeightsDataFrame[K], PortfolioWeightsDataFrame[K]](2,1,w => {
+          val linAlg = DenseDoubleAlgebra.DEFAULT
+
+          val ret = 1d + linAlg.mult(DoubleFactory1D.dense.make(w.leavers.last.weights.data), DoubleFactory1D.dense.make(w.joiner.observedReturns.data))
+          val perf = (w.lastResult.portfolioRisk + 1d) * ret -1d
+
+          PortfolioWeightsDataFrame[K](w.joiner.key, w.leavers.last.weights, w.joiner.observedReturns, perf)(w.joiner.keyOrdering)
+        }, _(0))) // do this portfolio performance calculation
+
+        val xx = b.add(
+          Flow[PortfolioOptimizationDataFrame[K]]
+            .map(df => {
+              implicit val ordering = df.keyOrdering
+              val key = Seq(df.covariance.key.asInstanceOf[K], df.expectedReturns.key.asInstanceOf[K], df.histororicReturns.key.asInstanceOf[K]).max
+              optimizePortfolio(key, df.covariance.colNames, df.covariance.data.getData, df.expectedReturns.data, df.histororicReturns.data)
+            }))
+
+        xx ~> drityFix
+
+        FlowShape(xx.in, drityFix.out)
+      })
+    )
+  }
+
+  def optimizePortfolio(key: K, assets: Seq[String], covarianceMatrix: Array[Array[Double]], expectedReturn: Array[Double], currentReturn: Array[Double])
+                       (implicit ordering: Ordering[K]): PortfolioWeightsDataFrame[K] = {
+    val linAlg = DenseDoubleAlgebra.DEFAULT
+    val returns = DoubleFactory1D.dense.make(currentReturn)
+    val sigma = DoubleFactory2D.dense.make(covarianceMatrix)
+    val sigmaScaled = sigma.copy().assign(DoubleFunctions.mult(riskAversion))
+    val mueScaled = DoubleFactory1D.dense.make(expectedReturn).assign(DoubleFunctions.mult(-riskyness(riskAversion)))
+
+    val weights = DoubleFactory1D.dense.make(
+      optimize(objectiveFunction(sigmaScaled, mueScaled)).map(w => if (w < smallPositionThreshold) 0d else w))
+
+    val portfolioReturn = linAlg.mult(weights, returns) // FIXME if we construct the portfolio end of day we can not have todays profit, we ony have the profit (or loss) of yesterdays positions!
+    val portfolioRisk = math.sqrt(linAlg.mult(linAlg.mult(sigma, weights), weights))
+
+    println()
+    //println(s"sigma:   $sigma")
+    //println(s"exp Ret: $mueScaled")
+    println(s"key:     $key")
+    println(s"assets:  $assets")
+    println(s"weights: $weights")
+    println(s"return:  $portfolioReturn")
+    println(s"risk:    $portfolioRisk")
+
+    PortfolioWeightsDataFrame(key, RowVector(key, assets, weights.toArray),RowVector(key, assets, currentReturn), 0)
+  }
+
+  def objectiveFunction(sigma: DoubleMatrix2D, mue: DoubleMatrix1D): OptimizationRequest = {
+
+    val objective = new PDQuadraticMultivariateRealFunction(sigma, mue, 0)
+    val inequalities: Array[ConvexMultivariateRealFunction] = (0 until mue.size.toInt).map(noShortConstraint(mue.size.toInt,_)).toArray
+
+    val or = new OptimizationRequest()
+    or.setF0(objective)
+    or.setFi(inequalities)
+    or
+  }
+
+  def optimize(problem: OptimizationRequest): Array[Double] = {
+    val optimizer = new JOptimizer()
+    optimizer.setOptimizationRequest(problem)
+    optimizer.optimize()
+    scaleResult(optimizer.getOptimizationResponse.getSolution)
+  }
+
+  def riskyness(riskAversion: Double): Double =
+    math.sqrt(-riskAversion + 1)
+
+  def noShortConstraint(size: Int, idx: Int): ConvexMultivariateRealFunction = {
+    val G = Array.fill(size)(0d)
+    G(idx) = -1d
+    new LinearMultivariateRealFunction(G, 0)
+  }
+
+  def scaleResult(solution: Array[Double]): Array[Double] = {
+    val max = solution.sum
+    solution.map(x => x / max)
+  }
+
+}
+
+object FooOptTest extends App {
+  implicit class lala(d: DoubleMatrix1D) {
+    def assign(idx: Int, value: Double): DoubleMatrix1D = {
+      d.set(idx, value); d
+    }
+  }
+
+  val foo = DoubleFactory1D.sparse.make(3).assign(1, 1d)
+
+  // -0.010341824515569087,0.0040953986990925895,0.0026311047035503243;
+  // -1.9145413088738792, 0.6783159699179959, 1.6584452482421872;
+  // DoubleMatrix(2014-06-20T00:00:00.000+02:00,Vector(AAPL, MSFT, GOOG),BlockRealMatrix{{0.0001395032,0.0000369541,0.0000531352},{0.0000369541,0.0001213006,0.0000587589},{0.0000531352,0.0000587589,0.0001418689}})
+  val expRet: Array[Double] = Array(-1.9145413088738792, -0.6783159699179959, 1.6584452482421872)
+  val cov: Array[Array[Double]] = Array(
+    Array(0.0001395032,0.0000369541,0.0000531352),
+    Array(0.0000369541,0.0001213006,0.0000587589),
+    Array(0.0000531352,0.0000587589,0.0001418689)
+  )
+
+  val x = DoubleFactory2D.dense.make(cov)
+  val algebra = new DenseDoubleAlgebra();
+  x.assign(DoubleFunctions.mult(2)) // assign does an inplace update
+
+  val objective = new PDQuadraticMultivariateRealFunction(cov, expRet, 0)
+  val inequalities: Array[ConvexMultivariateRealFunction] = Array(
+    new LinearMultivariateRealFunction(Array(-1d, 0, 0), 0),
+    new LinearMultivariateRealFunction(Array(0, -1d, 0), 0),
+    new LinearMultivariateRealFunction(Array(0, 0, -1d), 0)
+  )
+
+  val or = new OptimizationRequest()
+  or.setF0(objective)
+  or.setFi(inequalities)
+
+  val optimizer = new JOptimizer()
+  optimizer.setOptimizationRequest(or)
+  optimizer.optimize()
+  println(optimizer.getOptimizationResponse.getSolution.mkString(", "))
+}*/
+
+/*
+// Objective function
+		double[][] P = new double[][] {{ 1., 0.4 }, { 0.4, 1. }};
+		PDQuadraticMultivariateRealFunction objectiveFunction = new PDQuadraticMultivariateRealFunction(P, null, 0);
+
+		//equalities
+		double[][] A = new double[][]{{1,1}};
+		double[] b = new double[]{1};
+
+		//inequalities
+		ConvexMultivariateRealFunction[] inequalities = new ConvexMultivariateRealFunction[2];
+		inequalities[0] = new LinearMultivariateRealFunction(new double[]{-1, 0}, 0);
+		inequalities[1] = new LinearMultivariateRealFunction(new double[]{0, -1}, 0);
+
+		//optimization problem
+		OptimizationRequest or = new OptimizationRequest();
+		or.setF0(objectiveFunction);
+		or.setInitialPoint(new double[] { 0.1, 0.9});
+		//or.setFi(inequalities); //if you want x>0 and y>0
+		or.setA(A);
+		or.setB(b);
+		or.setToleranceFeas(1.E-12);
+		or.setTolerance(1.E-12);
+
+		//optimization
+		JOptimizer opt = new JOptimizer();
+		opt.setOptimizationRequest(or);
+		opt.optimize();
+
+		double[] sol = opt.getOptimizationResponse().solution;
+    sol[0] = -2 + 1.75/Math.sqrt(2)
+    sol[1] = -2 + 1.75/Math.sqrt(2)
+
+ */
