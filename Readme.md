@@ -4,12 +4,15 @@ The implementation is written in java/groovy and applied to a couple of crypto c
 
 ![Backtest](hrp-backtest.jpg)
 
+![current](hrp-current.jpg)
+
 
 ## Requirements
 * JRE 8
 * maven 3
 * Groovy >= 2.4.7
 * gnuplot installed and in the PATH variable
+* mplayer (mencoder) installed and in the PATH variable
 
 ## Build
 1. recoursively clone the repository  (you also need to fetch the submodule)<br>`git clone --recursive https://github.com/KIC/hrp.git`
