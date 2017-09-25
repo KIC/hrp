@@ -1,10 +1,19 @@
 package kic.dataframe.linalg;
 
+import java.lang.reflect.Array;
+
 /**
  * Created by kindler on 20/09/2017.
  */
 public class Rescale {
     private final double range0,range1,domain0,domain1;
+    private Object array = null;
+
+    // input == domain, output == range
+    public Rescale(double domain0, double domain1, Object array) {
+        this(domain0, domain1, 0, Array.getLength(array) - 1);
+        this.array = array;
+    }
 
     // input == domain, output == range
     public Rescale(double domain0, double domain1, double range0, double range1) {
@@ -37,5 +46,9 @@ public class Rescale {
         double[][] rescaled = new double[x.length][];
         for (int i = 0; i < x.length; i++) rescaled[i] = rescale(x[i]);
         return rescaled;
+    }
+
+    public <T>T discretize(double x) {
+        return (T) Array.get(array, (int) Math.round(rescale(x)));
     }
 }

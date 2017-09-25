@@ -19,7 +19,7 @@ class Gnuplot implements Consumer<DataFrame> {
     void accept(DataFrame dataFrame) {
         def args = arguments == null ? "" : arguments.apply(dataFrame).collect { k,v -> "$k=${"$v".isNumber() ? v : "'$v'"}" }.join("; ")
         def dataFile = new File(System.getProperty('java.io.tmpdir'), "${UUID.randomUUID().toString()}.csv")
-        dataFile.text = dataFrame.toString().replaceAll("null", "0.0")
+        dataFile.text = dataFrame.withDefault(0d).toString()
         //def command = "gnuplot -e \"filename='${dataFile.toString()}'; ${args}\" \"${plotFile.toString()}\""
         def command = ["gnuplot", "-e", "filename='${dataFile.toString()}';${args}", plotFile.toString()]
         imageFile.withOutputStream { it.write(ShellExec.exec(command)) } //   ..text = ShellExec.exec(command)

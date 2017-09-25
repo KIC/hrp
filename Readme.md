@@ -1,5 +1,10 @@
 ## Hierarchical Risk Parity (HRP) approach
-This is an implemenatation of a new approach to optimize Portfolios called [Hierarchical Risk Parity (HRP) approach](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2708678). 
+Here is an implementation of the [Hierarchical Risk Parity (HRP) approach](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2708678).
+HRP portfolios address three major concerns of quadratic optimizers in general and Markowitz’s CLA in particular: 
+* Instability
+* concentration 
+* and underperformance.
+
 The implementation is written in java/groovy and applied to a couple of crypto currencies. Before you ask, I did this mainly for pure fun.
 
 This chart compares the 1/N portfolio (meaning equally distributed) and the HRP Portfolio. While the 1/N Performance looks better its also more risky.

@@ -26,6 +26,28 @@ DataFrame deltaBars = prices.slide(2, deltaOperation({ sell, buy ->
 
 println(deltaBars)
 
+def classed = [:]
+deltaBars.getData().each {
+    def list = classed[it.classifier]
+    classed[it.classifier] = list == null ? [it] : list << it
+}
+
+classed.each { classifier, List<DeltaBar> bars ->
+    println("rule sample: ${bars.size()}")
+    def filename = "/tmp/bars/r.${classifier}.csv"
+    new File(filename).withWriter { out ->
+        bars.eachWithIndex { it, idx ->
+            out.println("$idx,${it.open},${it.high},${it.low},${it.close},${it.volume}")
+        }
+    }
+
+    def cmd = "cmd /C gnuplot -e \"filename='$filename'\" \"${new File(PATH, "../gnuplot/candlesticks.gnuplot").toString()}\" > ${filename}.jpg"
+    println(cmd)
+    cmd.execute()
+}
+
+/*
+
 
 // classify all delta bars
 // run a k-means // http://commons.apache.org/proper/commons-math/userguide/ml.html
@@ -71,6 +93,7 @@ dbClusters.eachWithIndex { c, index ->
 }
 
 println("done")
+*/
 
 
 // Functions
@@ -78,7 +101,7 @@ DataFrame getPriceDataFrame(symbol) {
     def yf = new Stooq()
     DataFrame prices = new DataFrame()
 
-    yf.getHistData(symbol, true).forEach { bar ->
+    yf.getHistData(symbol, true, true).forEach { bar ->
         prices.upsert(bar.date, symbol, bar)
     }
 
@@ -88,6 +111,7 @@ DataFrame getPriceDataFrame(symbol) {
 class DeltaBar extends DoublePoint {
     final String symbol
     final double open, high, low, close, volume
+    final int color, classifier
 
     //TODO try to rescale from low/high to -1d/1d
     DeltaBar(String symbol, double open, double high, double low, double close, double volume) {
@@ -101,6 +125,10 @@ class DeltaBar extends DoublePoint {
         this.low = low
         this.close = close
         this.volume = volume
+        this.color = abs(open / close - 1d) < 0.001 ? 1 : close > open ? 2 : 3
+        this.classifier = color * 10000 +
+                          new Rescale(low, high, (100..1200).step(100) as int[]).discretize(open) +
+                          new Rescale(low, high, (1..12) as int[]).discretize(close)
     }
 
     @Override

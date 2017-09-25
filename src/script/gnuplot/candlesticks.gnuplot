@@ -6,5 +6,6 @@ if (!exists("filename")) filename='/tmp/db.4.csv'
 #set timefmt"%Y-%m-%d"
 #set xrange ["2013-02-14":"2013-02-27"]
 set yrange [*:*]
+set offsets 1, 0, 0, 0
 set datafile separator ","
 plot filename using 1:2:4:3:5 notitle with candlesticks

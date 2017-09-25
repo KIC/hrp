@@ -1,5 +1,8 @@
 #!/usr/bin/env groovy
 import groovy.json.JsonOutput
+
+import java.time.*
+import java.time.temporal.*
 import static java.lang.Math.*
 
 //@Grab(group='com.apporiented' , module='hierarchical-clustering', version='1.1.1-SNAPSHOT')
@@ -74,12 +77,17 @@ DataFrame getPriceDataFrame(currencies) {
 def join(DataFrame objective, DataFrame targetWeights) {    // FIXME this join thingy needs to be refactored as well ... we need a proper join
     def portfolioPerformance = 0d;
     def oneOverNPerformance = 0d;
+    // DataFrame lastWeights = new
 
-    return { DataFrame window, DataFrame result ->
+    return { DataFrame window, DataFrame result -> // window ^= returns dataframe
         def lastRowKey = window.lastRowKey()
+        def isSunday = isSunday(lastRowKey)
+        if (isSunday) { println("sunday") } // filter sundays!
+
         DataFrame covariance = objective.getElement(lastRowKey, COVARIANCE)
         if (covariance?.columns() > 1) {
             // weigths
+            // currentWeighsVector = lastWeightsVector * (1 + return) // this is need ed for the returns coalculation between the rebalancings and for a more exact transaction cost estimate
             LabeledMatrix targetWeightsVector = targetWeights.select(covariance.getColumnOrder())
                                                              .withRows([lastRowKey])
                                                              .toMatrix()
@@ -117,6 +125,8 @@ def join(DataFrame objective, DataFrame targetWeights) {    // FIXME this join t
                     {rk, df -> null},
                     {rk, ck, val, df -> df.upsert(rk, "weight." + ck, val)})
 
+            // remember weights
+            lastWeightsVector = targetWeightsVector
         }
     }
 }
@@ -126,7 +136,7 @@ def covarianceCorrelationEstimator(int minSize, boolean demean = false) {
         // check if we had enough price changes per asset to actually build a valid covariance matrix
         def validColumns = window.countStar().findAll {col, cnt -> cnt >= window.rows() - (window.rows() / covariance_max_0_percent)}
 
-        // immediate return if we do not have enough data, i.e. ther is no point in optimizing a 1x1 Matrix
+        // immediate return if we do not have enough data, i.e. there is no point in optimizing a 1x1 Matrix
         if (validColumns.size() < minSize) return
 
         // estimate covarianec and correlation matrices and a hierachical cluster
@@ -140,6 +150,10 @@ def covarianceCorrelationEstimator(int minSize, boolean demean = false) {
     }
 }
 
+def isSunday(int unixTimeStamp) {
+    def dt = LocalDateTime.ofInstant(Instant.ofEpochSecond(unixTimeStamp), ZoneOffset.UTC)
+    return dt.dayOfWeek.value == 7
+}
 
 def optimizePortfolio() {
     return { DataFrame window, DataFrame result ->

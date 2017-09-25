@@ -13,6 +13,8 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.DoubleFunction;
 
 /**
  * Created by kindler on 16/09/2017.
@@ -47,6 +49,28 @@ public class LabeledMatrix<RK, CK> {
 
     public <CK>LabeledMatrix<RK, CK> multiply(LabeledMatrix<?, CK> matrix2) {
         return new LabeledMatrix<>(rowLabels, matrix2.columnLabels, matrix.multiply(matrix2.matrix));
+    }
+
+    public LabeledMatrix<RK, CK> elementWise(LabeledMatrix other, Double2Operation operation) {
+        // FIXME we want to merge on a label basis even if dimensions do not match
+
+        RealMatrix copy = matrix.copy();
+        copy.walkInOptimizedOrder(new RealMatrixChangingVisitor() {
+            @Override
+            public void start(int rows, int columns, int startRow, int endRow, int startColumn, int endColumn) { }
+
+            @Override
+            public double visit(int row, int column, double value) {
+                return operation.calc(value, other.matrix.getEntry(row, column));
+            }
+
+            @Override
+            public double end() {
+                return 0;
+            }
+        });
+
+        return new LabeledMatrix<>(rowLabels, columnLabels, copy);
     }
 
     public LabeledMatrix<RK, CK> elementWise(DoubleOperation operation) {
@@ -136,6 +160,56 @@ public class LabeledMatrix<RK, CK> {
         return df;
     }
 
+    public MinMax minMax() {
+        AtomicReference<MinMax> result = new AtomicReference<>();
+        matrix.walkInOptimizedOrder(new RealMatrixPreservingVisitor() {
+            int minI = -1, minJ = -1, maxI = -1, maxJ = -1;
+            double min = Double.MAX_VALUE, max = Double.MIN_VALUE;
+
+            @Override
+            public void start(int rows, int columns, int startRow, int endRow, int startColumn, int endColumn) {}
+
+            @Override
+            public void visit(int row, int column, double value) {
+                if (value < min) {
+                    min = value;
+                    minI = row;
+                    minJ = column;
+                }
+
+                if (value > max) {
+                    max = value;
+                    maxI = row;
+                    maxJ = column;
+                }
+            }
+
+            @Override
+            public double end() {
+                result.set(new MinMax(minI, minJ, maxI, maxJ, min, max));
+                return 0;
+            }
+        });
+
+        return result.get();
+    }
+
+    public Rescale rescale(double range0, double range1) {
+        MinMax mm = minMax();
+        return new Rescale(mm.min, mm.max, range0, range1);
+    }
+
+    public Rescale rescale(Object array) {
+        if (array.getClass().isArray()) {
+            MinMax mm = minMax();
+            return new Rescale(mm.min, mm.max, array);
+        } else  if (array instanceof Collection) {
+            MinMax mm = minMax();
+            return new Rescale(0,0, ((Collection) array).toArray());
+        } else {
+            throw new IllegalArgumentException("arguemnt needs to be collection or array");
+        }
+    }
 
     public double[][] to2DArray() {
         return matrix.getData();
@@ -156,5 +230,19 @@ public class LabeledMatrix<RK, CK> {
                 ", columnLabels=" + columnLabels +
                 ", matrix=" + matrix +
                 '}';
+    }
+
+    public static class MinMax {
+        public final int minI,minJ,maxI,maxJ;
+        public final double min, max;
+
+        public MinMax(int minI, int minJ, int maxI, int maxJ, double min, double max) {
+            this.minI = minI;
+            this.minJ = minJ;
+            this.maxI = maxI;
+            this.maxJ = maxJ;
+            this.min = min;
+            this.max = max;
+        }
     }
 }

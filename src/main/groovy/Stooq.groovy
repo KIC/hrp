@@ -10,15 +10,16 @@ class Stooq {
             csv = cache.text
         } else {
             def url = "https://stooq.com/q/d/l/?s=$symbol&i=d"
-            csv = new URL(url).getText().split("\n")
+            csv = new URL(url).getText()
             cache.text = csv
         }
 
-        if (csv.size() <= 1) return [[:]]
+        def csvRows = csv.split("\n")
+        if (csvRows.size() <= 1) return [[:]]
 
         def bars = []
-        for (int i = 1; i < csv.size(); i++) {
-            def cols = csv[i].split("\\s*,\\s*")
+        for (int i = 1; i < csvRows.size(); i++) {
+            def cols = csvRows[i].split("\\s*,\\s*")
             def notBar = cols[1].toDouble() == cols[2].toDouble() == cols[3].toDouble() == cols[4].toDouble()
             def validBar = !needBar || !notBar
             def validVol = !needVolume || cols.size() >= 6
