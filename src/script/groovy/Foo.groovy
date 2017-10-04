@@ -1,11 +1,27 @@
-sortIx=['a2', 'a4', 'a1', 'a3', 'a5']
-cItems=[sortIx]
-println(cItems)
+import kic.dataframe.*
+import kic.dataframe.join.*
 
-while (cItems.size()>0) {
-    // cItems=[i[j:k] for i in cItems for j,k in ((0,len(i)/2), (len(i)/2,len(i))) if len(i)>1]
-    cItems = cItems.findAll { it -> it.size() > 1 }
-                   .collectMany { it -> return [it.subList(0, it.size().intdiv(2)), it.subList(it.size().intdiv(2), it.size())] }
+currencies = ["ETH", "XMR"]
+referenceCurrency = "EUR"
+exchange="CCCAGG"
+frequency = "day"
 
-    println(cItems)
+DataFrame prices = getPriceDataFrame(currencies)
+Join join = new Join(prices, "prices_A", {l -> l.select(["ETH"])})
+def jonedDF = join.left(prices, "proces_B", new OuterJoinFillLastRow( { l, r -> r.select(l.getColumnOrder())} ))
+                  .left(prices, "proces_C", new OuterJoinFillLastRow( { l, r -> r.select(["XMR"])} ))
+
+println(jonedDF)
+
+DataFrame getPriceDataFrame(currencies) {
+    CryptoCompare cc = new CryptoCompare()
+    DataFrame prices = new DataFrame()
+
+    currencies.forEach { ccy ->
+        cc.getHistData(ccy, referenceCurrency, frequency, 0, exchange).forEach { bar ->
+            prices.upsert(bar.time, ccy, bar.close)
+        }
+    }
+
+    return prices
 }

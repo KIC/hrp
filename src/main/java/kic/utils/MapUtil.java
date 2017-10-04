@@ -3,6 +3,7 @@ package kic.utils;
 import kic.interfaces.Consumer3;
 
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -24,6 +25,18 @@ public class MapUtil {
         for (K k : keys) {
             V v = map.get(k);
             if (v != null) result.put(k, v);
+        }
+
+        return result;
+    }
+
+    public static <K, V>Map<K, V> zip(Collection<K> keys, Collection<V> values) {
+        Map<K, V> result = new LinkedHashMap<>();
+        Iterator<K> kit = keys.iterator();
+        Iterator<V> vit = values.iterator();
+
+        while (kit.hasNext() && vit.hasNext()) {
+            result.put(kit.next(), vit.next());
         }
 
         return result;

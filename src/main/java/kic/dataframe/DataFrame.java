@@ -6,6 +6,7 @@ import kic.utils.MapUtil;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -33,6 +34,7 @@ public class DataFrame<RK, CK, V> implements Serializable {
     // In Scala word we would use implicit classes for composition but in java we have to hardwire
     public final Reshape<RK, CK, V> reshape = new Reshape<>(this);
     public final Visitor<RK, CK, V> visit = new Visitor<>(this);
+    public final Slide<RK, CK, V> slide = new Slide<>(this);
 
     public DataFrame() {
         this.rowOrder = new ArrayList<>();
@@ -85,42 +87,19 @@ public class DataFrame<RK, CK, V> implements Serializable {
         }
     }
 
-
-    // TODO move to a different place
-    public <RK2,CK2,V2>DataFrame<RK2, CK2, V2> slide(int windowSize, BiConsumer<DataFrame<RK,CK,V>, DataFrame<RK2,CK2,V2>> windowFunction) {
-        /* we could make a window function of 60, which is calculating the 59 returns and then calculates the correlcation/covariance matrices and put those in a new DataFrame
-            in the window function i would pass the same object but with different rowOrderings
-
-            also zuerst haben wir preise
-            returns = prices.slide(2, calcReturns)
-            covcor = returns.slide(60, calcCovarianceAndCorrleation) // DataFrame<RK,CK,DataFrame>
-            clusteredCov = covcorr.slide(1, clusterCov)
-
-            weights = clusteredCov.slide(1, hrp)
-            portfolioReturns = weights' * returns
-            portfolioRIsk = weights' * cov * weights
-         */
-        DataFrame<RK2,CK2,V2> result = new DataFrame<>();
-        List<RK> rowKeys = new LinkedList<>();
-        for (RK rk : getRowOrder()) {
-            rowKeys.add(rk);
-            while (rowKeys.size() > windowSize) {
-                Iterator<RK> it = rowKeys.iterator();
-                it.next();
-                it.remove();
-            }
-
-            if (rowKeys.size() >= windowSize) {
-                DataFrame<RK, CK, V> window = new DataFrame<>(this, rowKeys, getColumnOrder());
-                windowFunction.accept(window, result);
-            }
-        }
-
-        return result;
+    // This is just a convinient accessor from groovy i.e. dataFrame["0:AAPL"]
+    private V getAt(String value) {
+        String[] rowCol = value.split(":");
+        int row = Integer.parseInt(rowCol[0]);
+        return getElement(getRowOrder().get(row < 0 ? rows() + row : row), (CK) rowCol[1]);
     }
 
     public DataFrame<CK, RK, V> transpose() {
         return new DataFrame<>(this, getColumnOrder(), getRowOrder(), columnRowIndex, rowColumnIndex, data, defaultValue);
+    }
+
+    public DataFrame<RK, CK, V> getColumn(CK columnKey) {
+        return new DataFrame<>(this, new ArrayList<>(columnRowIndex.get(columnKey).keySet()), Arrays.asList(columnKey));
     }
 
     public DataFrame<RK, CK, V> select(Predicate<? super CK> filter) {

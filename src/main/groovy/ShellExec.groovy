@@ -14,19 +14,19 @@ class ShellExec {
             cmd = commandlets
         }
 
-        logger.info("execute: $cmd")
+        logger.info("execute: ${cmd.join(" ")}")
         def process = cmd.execute()
         def out = new ByteArrayOutputStream()
         def err = new ByteArrayOutputStream()
         process.waitForProcessOutput(out, err)
 
+        def stdOut = out.toString()
+        def errOut = err.toString()
+
         if (process.exitValue() == 0) {
-            def stdOut = out.toString()
-            logger.info("${process.exitValue()}: ${stdOut.substring(0, Math.min(stdOut.length(), 255))}")
+            logger.info("${process.exitValue()}: ${stdOut.substring(0, Math.min(stdOut.length(), 255))} \n$errOut")
             return out.toByteArray()
         } else {
-            def stdOut = out.toString()
-            def errOut = err.toString()
             logger.error("${process.exitValue()}: ${stdOut}\n$errOut")
             return new byte[0]
         }

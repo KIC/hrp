@@ -1,6 +1,7 @@
 package kic.dataframe.linalg;
 
 import kic.dataframe.DataFrame;
+import kic.utils.MapUtil;
 import org.apache.commons.math3.linear.MatrixUtils;
 import org.apache.commons.math3.linear.RealMatrix;
 import org.apache.commons.math3.linear.RealMatrixChangingVisitor;
@@ -13,8 +14,11 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.DoubleFunction;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Created by kindler on 16/09/2017.
@@ -41,6 +45,19 @@ public class LabeledMatrix<RK, CK> {
         this.rowLabels = rowLabels;
         this.columnLabels = columnLabels;
         this.matrix = matrix;
+    }
+
+    public LabeledMatrix<RK, CK> getRow(int i) {
+        return new LabeledMatrix<>(rowLabels.get(i), columnLabels, matrix.getRow(i));
+    }
+
+    public <CK2>Map<CK2, Double> getRowAsMap(int i, Function<? super CK, CK2> keyMapper) {
+        return MapUtil.zip(columnLabels.stream().map(keyMapper).collect(Collectors.toList()),
+                           Arrays.stream(matrix.getRow(i)).boxed().collect(Collectors.toList()));
+    }
+
+    public LabeledMatrix<CK, RK> getColumnAsRowVector(int j) {
+        return new LabeledMatrix<>(columnLabels.get(j), rowLabels, matrix.getColumn(j));
     }
 
     public LabeledMatrix<CK, RK> transpose() {

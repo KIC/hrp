@@ -14,9 +14,9 @@ def symbol = "^spx" // "^dji"
 DataFrame prices = getPriceDataFrame(symbol)
 println(prices)
 
-// calculate delta bars relative to last close and then
+// calculate delta bars relative to last close and thenCalculate
 // convert these delta bars to org.apache.commons.math4.ml.clustering.DoublePoint(double[])
-DataFrame deltaBars = prices.slide(2, deltaOperation({ sell, buy ->
+DataFrame deltaBars = prices.slide.slide(2, deltaOperation({ sell, buy ->
     new DeltaBar(sell.symbol.toString(),
                  sell.open   / buy.close  - 1d as double,
                  sell.high   / buy.close  - 1d as double,

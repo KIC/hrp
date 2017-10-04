@@ -89,7 +89,7 @@ class LabeledMatrixTest extends Specification {
 
         when:
         // TODO implement stimulus
-        then:
+        thenCalculate:
         // TODO implement assertions
     }
 
@@ -98,7 +98,7 @@ class LabeledMatrixTest extends Specification {
 
         when:
         // TODO implement stimulus
-        then:
+        thenCalculate:
         // TODO implement assertions
     }
 
@@ -107,7 +107,7 @@ class LabeledMatrixTest extends Specification {
 
         when:
         // TODO implement stimulus
-        then:
+        thenCalculate:
         // TODO implement assertions
     }*/
 }
