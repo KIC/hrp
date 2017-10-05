@@ -21,6 +21,8 @@ import kic.dataframe.linalg.*
 import kic.pipeline.PipelineExecutor
 import static kic.dataframe.Operations.*
 
+import static ScriptConstants.*
+
 // TODO Next
 // TODO make rebalancing happening on sundays
 // TODO add trading costs
@@ -40,43 +42,37 @@ covariance_max_0_percent = 0.15
 min_assets = 3
 trading_costs = 0.0016 // 0.16% on kraken
 
-// constants
+// constants - FIXME this two constants will be replace by the args scanner
 PATH = new File(getClass().protectionDomain.codeSource.location.path).getParentFile()
 PLOTPATH = new File(PATH, "../gnuplot/")
-COVARIANCE = "COVARIANCE"
-CORRELATION = "CORRELATION"
-CLUSTERED = "CLUSTERED"
-MEANRETURNS = "MEANRETURNS"
-VaR95_Z_SCORE = 1.645 // stddev to VaR 95 factor
 
-println("running at: $PATH\nusing temp: ${System.getProperty('java.io.tmpdir')}")
-
+// FIXME move strings to constants!
 // NOTE we have weired huge jumps i.e. dash jumps 1400% in one day, so we ignore 3 fold and bigger jumps in prices
 def experiment = PipelineExecutor
-    .startFrom("prices", getPriceDataFrame(currencies))
-    .thenCalculate("returns", { prices -> prices.slide.slide(2, deltaOperation({ sell, buy -> sell != buy && sell < 4 * buy ? sell / buy - 1d : null }))})
-    .thenCalculate("objective", { returns -> returns.slide.window(covariance_window, covarianceCorrelationReturnsEstimator(min_assets, covariance_correct_bias)) })
-    .thenCalculate("hrpweights", { objective -> objective.slide.rows(optimizeHierarchicalRiskPortfolio()) })
-        .and("meanvarainceweights", { objective -> objective.slide.rows(optimizeMeanVariancePortfolio())})
-    .join("returnsandweights", "objective", { objective -> objective["-1:$COVARIANCE"] }, [
-        returns: new OuterJoinFillLastRow({ l, r -> r.select(l.getColumnOrder()) }),
-        hrpweights: new OuterJoinFillLastRow({ l, r -> r.select(l.getColumnOrder()) }),
-        meanvarainceweights: new OuterJoinFillLastRow({ l, r -> r.select(l.getColumnOrder()) })
+    .startFrom(PRICES, getPriceDataFrame(currencies))
+    .thenCalculate(RETURNS, { prices -> prices.slide.slide(2, deltaOperation({ sell, buy -> sell != buy && sell < 4 * buy ? sell / buy - 1d : null }))})
+    .thenCalculate(OBJECTIVE, { returns -> returns.slide.window(covariance_window, covarianceCorrelationReturnsEstimator(min_assets, covariance_correct_bias)) })
+    .thenCalculate(HRP_WEIGHTS, { objective -> objective.slide.rows(optimizeHierarchicalRiskPortfolio()) })
+        .and(MEAN_VARIANCE_WEIGHTS, { objective -> objective.slide.rows(optimizeMeanVariancePortfolio())})
+    .join(RETURNS_AND_WEIGHTS, OBJECTIVE, { objective -> objective["-1:$COVARIANCE"] }, [
+        (RETURNS): new OuterJoinFillLastRow({ l, r -> r.select(l.getColumnOrder()) }),
+        (HRP_WEIGHTS): new OuterJoinFillLastRow({ l, r -> r.select(l.getColumnOrder()) }),
+        (MEAN_VARIANCE_WEIGHTS): new OuterJoinFillLastRow({ l, r -> r.select(l.getColumnOrder()) })
     ])
-    .thenCalculate("backtest", { rw -> rw.slide.rows(backtest()).sortColumns() })
+    .thenCalculate(BACKTEST, { rw -> rw.slide.rows(backtest()).sortColumns() })
     .passOverTo(new Gnuplot(new File(PLOTPATH, "hrp-backtest.gnuplot"), new File("/tmp/hrp-backtest-cov-$covariance_window-${covariance_correct_bias ? "corrected" : "biased"}.jpg"), { [weights: currencies.size() ] }))
-    .thenCalculate("currentweights", { weights -> weights.select({ it.startsWith("weight in HRP") }).withRows([weights.lastRowKey()]).transpose() })
+    .thenCalculate(CURRENT_WEIGHTS, { weights -> weights.select({ it.startsWith("weight in HRP") }).withRows([weights.lastRowKey()]).transpose() })
     .passOverTo(new Gnuplot(new File(PLOTPATH, "hrp-current.gnuplot"), new File("/tmp/hrp-current-$covariance_window-${covariance_correct_bias ? "corrected" : "biased"}.jpg")))
     //.thenCalculate("coins", {claculate needed coins}
     .getPipelineResults()
 
 
-println(experiment["backtest"].withDefault(0d))
+println(experiment[(BACKTEST)].withDefault(0d))
 
 // if needed output some json files ...
 //new File("rows.json").text = JsonOutput.toJson(joined.reshape.toMapOfRowMaps())
 //new File(columns.json).text = JsonOutput.toJson(joined.reshape.toMapOfColumMaps())
-println(experiment["prices"])
+println(experiment[PRICES])
 println("done")
 
 
@@ -101,10 +97,10 @@ def backtest() {
     def oneOverNPerformance = 0d;
 
     return { window ->
-        LabeledMatrix returns = window["-1:returns"].toMatrix()
-        LabeledMatrix covariance = window["-1:objective"].toMatrix()
-        LabeledMatrix hrpWeights = window["-1:hrpweights"].toMatrix()
-        LabeledMatrix meanVarainceWeights = window["-1:meanvarainceweights"].toMatrix()
+        LabeledMatrix returns = window["-1:$RETURNS"].toMatrix()
+        LabeledMatrix covariance = window["-1:$OBJECTIVE"].toMatrix()
+        LabeledMatrix hrpWeights = window["-1:$HRP_WEIGHTS"].toMatrix()
+        LabeledMatrix meanVarainceWeights = window["-1:$MEAN_VARIANCE_WEIGHTS"].toMatrix()
         LabeledMatrix oneOverNWeights = returns.elementWise({ d -> 1d / returns.columns() })
 
         // returns
@@ -215,4 +211,23 @@ def optimizeMeanVariancePortfolio(double lamda = 0d) {
 
         return [meanReturns.columnLabels, unscaledWeights].transpose().collectEntries { [(it[0]): it[1] / norm]}
     }
+}
+
+
+class ScriptConstants {
+    final static String COVARIANCE = "COVARIANCE"
+    final static String CORRELATION = "CORRELATION"
+    final static String CLUSTERED = "CLUSTERED"
+    final static String MEANRETURNS = "MEANRETURNS"
+    final static String PRICES = "PRICES"
+    final static String RETURNS = "RETURNS"
+    final static String OBJECTIVE = "OBJECTIVE"
+    final static String HRP_WEIGHTS = "HRP_WEIGHTS"
+    final static String MEAN_VARIANCE_WEIGHTS = "MEAN_VARIANCE_WEIGHTS"
+    final static String CURRENT_WEIGHTS = "CURRENT_WEIGHTS"
+    final static String RETURNS_AND_WEIGHTS = "RETURNS_AND_WEIGHTS"
+    final static String BACKTEST = "BACKTEST"
+
+    final static double VaR95_Z_SCORE = 1.645 // stddev to VaR 95 factor
+
 }
