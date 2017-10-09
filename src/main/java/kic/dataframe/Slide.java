@@ -31,7 +31,6 @@ public class Slide<RK, CK, V> {
         return result;
     }
 
-    @Deprecated
     public <RK2,CK2,V2>DataFrame<RK2, CK2, V2> slide(int windowSize, BiConsumer<DataFrame<RK,CK,V>, DataFrame<RK2,CK2,V2>> windowFunction) {
         DataFrame<RK2,CK2,V2> result = new DataFrame<>();
         slide(result, windowSize, windowFunction);

@@ -177,7 +177,7 @@ public class DataFrame<RK, CK, V> implements Serializable {
     public V getElement(RK rk, CK ck) {
         return columnRowIndex.containsKey(ck)
             ? getDataOr((Integer) rowColumnIndex.getOrDefault(rk, EMPTY_MAP).get(ck), defaultValue)
-            : null;
+            : defaultValue;
     }
 
     public V getDataOr(Integer idx, V or) {

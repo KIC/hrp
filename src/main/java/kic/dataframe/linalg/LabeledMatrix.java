@@ -60,6 +60,10 @@ public class LabeledMatrix<RK, CK> {
         return new LabeledMatrix<>(columnLabels.get(j), rowLabels, matrix.getColumn(j));
     }
 
+    public double getElement(int i, int j) {
+        return matrix.getEntry(i, j);
+    }
+
     public LabeledMatrix<CK, RK> transpose() {
         return new LabeledMatrix<>(columnLabels, rowLabels, matrix.transpose());
     }

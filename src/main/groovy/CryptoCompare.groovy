@@ -11,7 +11,7 @@ class CryptoCompare {
 
     def getHistData(cryptoCurrency, inCurrency, frequency="day", since=0, exchange="Kraken") {
         def cache = new File(System.getProperty('java.io.tmpdir'), "cache.${frequency}.${cryptoCurrency}.${inCurrency}.${exchange}.cryptocompare")
-        def url = "https://min-api.cryptocompare.com/data/histo$frequency?fsym=$cryptoCurrency&tsym=$inCurrency&e=$exchange&extraParams=Test&allData=true"
+        def url = "https://min-api.cryptocompare.com/data/histo$frequency?fsym=$cryptoCurrency&tsym=$inCurrency&e=$exchange&extraParams=Test&allData=true&limit=2000"
         def response = ""
 
         // cache file for 8 hours
