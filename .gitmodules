@@ -1,3 +1,6 @@
 [submodule "hierarchical-clustering-java"]
 	path = hierarchical-clustering-java
 	url = https://github.com/KIC/hierarchical-clustering-java.git
+[submodule "LPPL"]
+	path = LPPL
+	url = https://github.com/KIC/LPPL.git

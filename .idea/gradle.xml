@@ -10,6 +10,8 @@
         <option name="modules">
           <set>
             <option value="$PROJECT_DIR$" />
+            <option value="$PROJECT_DIR$/LPPL" />
+            <option value="$PROJECT_DIR$/synchronizer" />
           </set>
         </option>
         <option name="resolveModulePerSourceSet" value="false" />

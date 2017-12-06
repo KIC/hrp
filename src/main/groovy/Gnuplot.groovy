@@ -26,7 +26,11 @@ class Gnuplot implements Consumer<DataFrame> {
     }
 
     String formatNumber(Object d) {
-        return String.format("%.9f", d != null && d.toString().isNumber() ? d : 0d)
+        try {
+            return String.format("%.9f", d != null && d.toString().isNumber() ? d : 0d)
+        } catch (Exception e) {
+            return d;
+        }
     }
 
 }

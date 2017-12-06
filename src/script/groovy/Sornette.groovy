@@ -25,7 +25,8 @@ def priceBTC = getPriceDataFrame("BTC")
 println(priceBTC)
 println("---")
 
-def s = priceBTC.slide.slide(360, sornette(360, 10, 12))
+def columns = ["CLOSE", "HIGH", "LOW"]
+def s = priceBTC.slide.slide(360, sornette(columns, 360, 10, 12))
 s = s.sortRows()
 println(s)
 
@@ -39,7 +40,7 @@ def result = new Join(s, "heat")
         })
 
 println(result)
-//new File("/tmp/heat.csv").text = result.toString()
+new File("/tmp/price-heat.csv").text = result.toString()
 
 DataFrame getPriceDataFrame(currency) {
     CryptoCompare cc = new CryptoCompare()
@@ -52,14 +53,17 @@ DataFrame getPriceDataFrame(currency) {
         prices.upsert(bar.time as Long, "CLOSE", bar.close as double)
         prices.upsert(bar.time as Long, "HIGH", bar.high as double)
         prices.upsert(bar.time as Long, "LOW", bar.low as double)
+        prices.upsert(bar.time as Long, "LOG_CLOSE", log(bar.close as double))
+        prices.upsert(bar.time as Long, "LOG_HIGH", log(bar.high as double))
+        prices.upsert(bar.time as Long, "LOG_LOW", log(bar.low as double))
     }
 
     return prices
 }
 
-def sornette(int window, int nrOfSubwindows, int step = 1) {
+// implementaion of https://www.sg.ethz.ch/ethz_risk_center_wps/pdf/ETH-RC-11-002.pdf
+def sornette(columns, int window, int nrOfSubwindows, int step = 1) {
     if (nrOfSubwindows * step >= window) throw new IllegalArgumentException("subwindows * step needs to be smaller as window!")
-    def columns = ["CLOSE", "HIGH", "LOW"]
     double lastM = 0.5d
     double lastW = 9d
 
@@ -166,7 +170,7 @@ public class ABCC {
         }
 
         RealMatrix coefficients = new Array2DRowRealMatrix([
-            [ N + 1d,    sum_fi,     sum_gi,        sum_hi ],
+            [ N,         sum_fi,     sum_gi,        sum_hi ],
             [ sum_fi,    sum_fi2,    sum_fi_gi,     sum_fi_hi ],
             [ sum_gi,    sum_fi_gi,  sum_gi2,       sum_gi_hi ],
             [ sum_hi,    sum_fi_hi,  sum_gi_hi,     sum_hi2 ]] as double[][],

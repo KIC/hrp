@@ -101,7 +101,7 @@ DataFrame getPriceDataFrame(symbol) {
     def yf = new Stooq()
     DataFrame prices = new DataFrame()
 
-    yf.getHistData(symbol, true, true).forEach { bar ->
+    yf.getHistData(symbol,"", true, true).forEach { bar ->
         prices.upsert(bar.date, symbol, bar)
     }
 

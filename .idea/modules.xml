@@ -2,7 +2,9 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/LPPL/LPPL.iml" filepath="$PROJECT_DIR$/.idea/modules/LPPL/LPPL.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/modules/dataframe.iml" filepath="$PROJECT_DIR$/.idea/modules/dataframe.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/synchronizer.iml" filepath="$PROJECT_DIR$/.idea/modules/synchronizer.iml" />
     </modules>
   </component>
 </project>
